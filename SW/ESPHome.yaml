@@ -8,6 +8,10 @@ substitutions:
 esphome:
   name: ${device_name}
   comment: IKEA LaskaKit ESP-VINDRIKTNING ESP-32 I2C
+  on_boot:
+      - light.turn_on:
+          id: status
+          brightness: 0%
 
 esp32:
   board: nodemcu-32s
@@ -17,8 +21,17 @@ esp32:
 wifi:
   ssid: ${wifi_ssid}
   password: ${wifi_password}
+  fast_connect: on
+  
+  manual_ip: #docasny workaround pro https://github.com/esphome/issues/issues/3003
+    static_ip: 192.168.62.19
+    gateway: 192.168.62.1
+    subnet: 255.255.255.0
+#  use_address: 192.168.62.181
+
 api:
   password: ${api_password}
+  
 ota:
   password: ${ota_password}
 
@@ -33,7 +46,7 @@ uart:
 sensor:
   - platform: pm1006
     pm_2_5:
-      name: "Particulate Matter 2.5µm Concentration"
+      name: "Particulate Matter 2.5µm Concentration ${device_name}"
       id: pm
       accuracy_decimals: 1
       on_value:
@@ -75,11 +88,13 @@ sensor:
                     blue: 0.0
                     color_brightness:  !lambda |-
                       return id(sun_elevation).state > 0 ? 1.0 : 0.5;
+        - switch.turn_on: fan_delay
     uart_id: uart2
-    update_interval: 20s
+    update_interval: 60s # koukni na fan_delay
+
   - platform: scd4x
     co2:
-      name: "CO2"
+      name: "CO2 ${device_name}"
       id: co2
       on_value:
         then:
@@ -120,8 +135,9 @@ sensor:
                     blue: 0.0
                     color_brightness:  !lambda |-
                       return id(sun_elevation).state > 0 ? 1.0 : 0.5;
+        
     humidity:
-      name: "Humidity"    
+      name: "Humidity ${device_name}"    
       id: humidity
       on_value:
         then:
@@ -167,7 +183,7 @@ sensor:
     entity_id: sun.sun
     attribute: elevation
   - platform: wifi_signal
-    name: "Air quality WiFi Signal Sensor"
+    name: "RSSI ${device_name}"
     entity_category: diagnostic
     disabled_by_default: true
     update_interval: 60s
@@ -179,6 +195,16 @@ switch:
     restore_mode: ALWAYS_ON
     disabled_by_default: true
     entity_category: diagnostic
+    
+  - platform: template
+    entity_category: diagnostic
+    disabled_by_default: true
+    id: fan_delay
+    turn_on_action:
+      - switch.turn_off: fan
+      - delay: 50s # cas o 10 sekund kratsi, nez je update_interval senzoru pm1006
+      - switch.turn_on: fan
+
   
 light:
   - platform: neopixelbus
@@ -187,6 +213,10 @@ light:
     pin: GPIO25
     num_leds: 3
     id: status
+    restore_mode: ALWAYS_ON
+    method:
+      type: esp32_rmt
+      channel: 6
 
 i2c:
   sda: 21
@@ -199,3 +229,22 @@ button:
     name: "Restart ${device_name}"
     disabled_by_default: true
     entity_category: diagnostic
+
+font:
+  - file: "gfonts://Roboto"
+    id: roboto
+    size: 14
+    
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x32"
+    address: 0x3C
+
+    lambda: |-
+      it.printf(10, 0, id(roboto), "PM2.5: %4.0f ppm", id(pm).state);
+      if (!isnan(id(co2).state))  {
+        it.printf(10, 16, id(roboto), "CO2: %4.0f ppm", id(co2).state);
+      } else {
+        it.printf(10, 16, id(roboto), "CO2: starting");
+      }
+      
